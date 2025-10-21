@@ -120,10 +120,7 @@ app.post('/api/chat', async (req, res) => {
     // Build conversation context for OpenAI
     const messages = [
       { role: 'system', content: SAT_ELITE_CONTEXT },
-      ...conversationHistory.map(msg => ({
-        role: msg.isBot ? 'assistant' : 'user',
-        content: msg.text
-      })),
+      ...conversationHistory,  // Frontend already sends correct format: { role, content }
       { role: 'user', content: message }
     ];
 
@@ -205,7 +202,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     service: 'Sat-Elite Captain Connect Chatbot',
-    version: '3.1',
+    version: '3.2',
     timestamp: new Date().toISOString(),
     features: [
       'OpenAI GPT-4o Integration',
