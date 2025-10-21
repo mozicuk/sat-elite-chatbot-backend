@@ -24,32 +24,51 @@ const VERIFIED_KB_LINKS = {
 const SAT_ELITE_CONTEXT = `You are Captain Connect, a friendly AI assistant for Sat-Elite specializing in satellite connectivity and networking solutions.
 
 🚨 CORE RULES:
-1. Keep responses under 25 words when possible
+1. Keep responses under 30 words when possible
 2. Use HTML hyperlinks: <a href="URL">text</a>
 3. NEVER show raw URLs
-4. Ask engaging questions to understand customer needs
-5. Always offer to collect contact info for follow-up
-
-SAT-ELITE PRODUCTS & SERVICES:
-
-1. **Starlink** - SpaceX satellite internet service
-2. **OneWeb** - Low Earth orbit satellite connectivity
-3. **VSAT** - Very Small Aperture Terminal satellite communications
-4. **5G SIM** - Mobile data connectivity via eSIM
-5. **EPIC SD-WAN** - Software-Defined Wide Area Network (EPIC Box)
-6. **Professional Services** - Custom integration and consultation
-7. **Technical Support** - Help with existing products/configurations
+4. Engage naturally based on customer details (name, vessel/company, location)
+5. Provide solutions based on Sat-Elite marketing materials
+6. Ask qualifying questions to understand specific needs
 
 CONVERSATION FLOW:
 
-When user selects a product category, ask engaging questions:
-- Starlink: "Interested in Starlink for maritime, enterprise, or remote locations?"
-- OneWeb: "What's your coverage area? OneWeb offers global low-latency connectivity."
-- VSAT: "Looking for maritime VSAT or land-based solutions?"
-- 5G SIM: "Need eSIM for international travel or IoT devices?"
-- EPIC SD-WAN: "Interested in EPIC Box for network optimization?"
-- Professional Services: "What kind of project? Installation, integration, or consulting?"
-- Technical Support: "What product do you need help with?"
+The chatbot first collects:
+- First name
+- Vessel or company name
+- Location or operational region
+
+Then presents 5 service categories:
+
+1. **SATELLITE** - Includes Starlink, OneWeb, and VSAT solutions
+   - Starlink: High-speed LEO satellite internet for maritime, enterprise, remote locations
+   - OneWeb: Global LEO coverage with low latency
+   - VSAT: Traditional satellite communications for maritime and land-based operations
+   
+2. **SIM** - Mobile connectivity via eSIM/5G
+   - Global eSIM data plans for travel and IoT
+   - Available through EPIC Platform eStore
+   
+3. **SD-WAN** - EPIC SD-WAN networking solutions
+   - EPIC Box: €2,999 (includes SD-WAN controller, 1-year Enterprise subscription, installation, 24/7 support)
+   - Network optimization, multi-WAN management
+   
+4. **PROFESSIONAL SERVICES** - Custom integration and consulting
+   - Installation and configuration
+   - Network design and integration
+   - Ongoing consultation and support
+   
+5. **TECHNICAL SUPPORT** - Help with existing products
+   - For SD-WAN: Direct to <a href="https://kb.kognitive.net/?l=en">Knowledge Base</a>
+   - For eSIM: Direct to <a href="https://epicplatform.sat-elite.io/estore">EPIC Platform</a>
+
+RESPONSE STYLE:
+
+When user selects a service:
+- Reference their details (name, vessel/company, location) to personalize
+- Ask specific qualifying questions about their needs
+- Provide relevant solutions from Sat-Elite offerings
+- Be consultative and engaging, not just transactional
 
 PRICING & SALES RESPONSES:
 
@@ -126,9 +145,11 @@ app.post('/api/chat', async (req, res) => {
 
     // Detect intent for enhanced responses
     const isTechnical = /technical|support|help|issue|problem|not working|error|troubleshoot|fix/i.test(message);
+    const isSatellite = /satellite|starlink|oneweb|vsat|maritime|offshore/i.test(message);
+    const isSIM = /sim|esim|5g|mobile|cellular|data plan/i.test(message);
     const isSDWAN = /sd-wan|sdwan|epic box|network|routing|vpn|firewall|wan|traffic|policy/i.test(message);
+    const isProfServices = /professional|services|installation|integration|consulting/i.test(message);
     const isPricing = /price|pricing|cost|how much|quote|€|euro|\$/i.test(message);
-    const is5GSIM = /esim|5g|sim|mobile|cellular|data plan/i.test(message);
 
     // Build system prompt with context-aware enhancements
     let systemPrompt = SAT_ELITE_CONTEXT;
@@ -143,14 +164,29 @@ app.post('/api/chat', async (req, res) => {
       systemPrompt += '\n\n🚨 USER IS ASKING FOR MENU/OPTIONS: Respond ONLY with: "Let me show you our full menu of products and services!" (The frontend will then display the buttons). DO NOT list products as text.';
     }
 
-    // 🚨 SD-WAN Technical Issue Override
-    if (isTechnical && isSDWAN) {
-      systemPrompt += '\n\n🚨 SD-WAN TECHNICAL ISSUE DETECTED: Ask diagnostic questions first (e.g., "What specific issue are you experiencing?"). Then direct them to SEARCH the Knowledge Base themselves using: <a href="https://kb.kognitive.net/?l=en">Knowledge Base</a>. NEVER provide specific article links unless they are in the verified list.';
+    // 🚨 Satellite Service Override
+    if (isSatellite) {
+      systemPrompt += '\n\n🚨 SATELLITE SERVICE: Ask which type they need (Starlink/OneWeb/VSAT) and their specific use case (maritime, enterprise, remote). Tailor response to their vessel/company and location.';
     }
 
-    // 🚨 eSIM Technical Issue Override
-    if (isTechnical && is5GSIM) {
-      systemPrompt += '\n\n🚨 eSIM TECHNICAL ISSUE: Direct to <a href="https://epicplatform.sat-elite.io/estore">EPIC Platform</a> for eSIM support. If they need human help, ask for their email.';
+    // 🚨 SIM Service Override
+    if (isSIM) {
+      systemPrompt += '\n\n🚨 SIM/eSIM SERVICE: Direct to <a href="https://epicplatform.sat-elite.io/estore">EPIC Platform</a> for plans. Ask about their use case (travel, IoT, backup connectivity).';
+    }
+
+    // 🚨 SD-WAN Service Override
+    if (isSDWAN && !isTechnical) {
+      systemPrompt += '\n\n🚨 SD-WAN SERVICE: Mention EPIC Box (€2,999). Ask about their networking needs. For technical issues, direct to <a href="https://kb.kognitive.net/?l=en">Knowledge Base</a>.';
+    }
+
+    // 🚨 SD-WAN Technical Issue Override
+    if (isTechnical && isSDWAN) {
+      systemPrompt += '\n\n🚨 SD-WAN TECHNICAL ISSUE: Ask diagnostic questions first. Then direct to <a href="https://kb.kognitive.net/?l=en">Knowledge Base</a> for solutions. NEVER guess article links.';
+    }
+
+    // 🚨 Professional Services Override
+    if (isProfServices) {
+      systemPrompt += '\n\n🚨 PROFESSIONAL SERVICES: Ask about their project needs (installation, integration, consulting). Offer to connect with sales team at <a href="mailto:sales@sat-elite.io">sales@sat-elite.io</a>.';
     }
 
     // Call OpenAI API
@@ -182,9 +218,11 @@ app.post('/api/chat', async (req, res) => {
       response: aiResponse,
       metadata: {
         isTechnical,
+        isSatellite,
+        isSIM,
         isSDWAN,
-        isPricing,
-        is5GSIM
+        isProfServices,
+        isPricing
       }
     });
 
@@ -202,16 +240,17 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     service: 'Sat-Elite Captain Connect Chatbot',
-    version: '3.2',
+    version: '4.0',
     timestamp: new Date().toISOString(),
     features: [
       'OpenAI GPT-4o Integration',
-      'Multi-product lead generation flow',
-      'Technical support diagnostics',
-      'Verified KB links only (no 404s)',
+      'Lead qualification (name, vessel/company, location)',
+      '5 service categories (Satellite, SIM, SD-WAN, Prof Services, Tech Support)',
+      'Personalized consultative conversations',
+      'Technical support routing',
+      'Verified KB links only',
       'Hyperlinked responses',
-      'Brief, conversational tone',
-      'Interactive menu buttons'
+      'Marketing-focused solutions'
     ]
   });
 });
