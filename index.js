@@ -1,12 +1,26 @@
-const express = require('express');
-const cors = require('cors');
+import express from 'express';
+import cors from 'cors';
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// ✅ VERIFIED KOGNTIVE KB LINKS - Only links confirmed to work
+const VERIFIED_KB_LINKS = {
+  main: 'https://kb.kognitive.net/?l=en',
+  
+  // Only add specific article links here after verifying they exist
+  // Format: 'topic-keyword': 'full-url'
+  
+  // Example (commented out until verified):
+  // 'traffic-policy': 'https://kb.kognitive.net/es7/creating-a-new-network-traffic-policy',
+  // 'initial-setup': 'https://kb.kognitive.net/es7/initial-configuration',
+};
 
+// 🎯 SAT-ELITE CHATBOT CONTEXT
 const SAT_ELITE_CONTEXT = `You are Captain Connect, a friendly AI assistant for Sat-Elite specializing in satellite connectivity and networking solutions.
 
 🚨 CORE RULES:
@@ -22,7 +36,7 @@ SAT-ELITE PRODUCTS & SERVICES:
 2. **OneWeb** - Low Earth orbit satellite connectivity
 3. **VSAT** - Very Small Aperture Terminal satellite communications
 4. **5G SIM** - Mobile data connectivity via eSIM
-5. **SD-WAN** - Software-Defined Wide Area Network (EPIC SD-WAN)
+5. **EPIC SD-WAN** - Software-Defined Wide Area Network (EPIC Box)
 6. **Professional Services** - Custom integration and consultation
 7. **Technical Support** - Help with existing products/configurations
 
@@ -33,7 +47,7 @@ When user selects a product category, ask engaging questions:
 - OneWeb: "What's your coverage area? OneWeb offers global low-latency connectivity."
 - VSAT: "Looking for maritime VSAT or land-based solutions?"
 - 5G SIM: "Need eSIM for international travel or IoT devices?"
-- SD-WAN: "Interested in EPIC Box for network optimization?"
+- EPIC SD-WAN: "Interested in EPIC Box for network optimization?"
 - Professional Services: "What kind of project? Installation, integration, or consulting?"
 - Technical Support: "What product do you need help with?"
 
@@ -48,16 +62,24 @@ For EPIC Box product:
 For 5G SIM:
 "Browse eSIM plans at the <a href='https://epicplatform.sat-elite.io/estore'>EPIC Platform</a>."
 
-TECHNICAL SUPPORT:
+TECHNICAL SUPPORT - CRITICAL RULES:
 
-For technical questions:
-1. Ask specific diagnostic questions
-2. Search Kogntive Knowledge Base
-3. If article found, summarize key points and provide link
-4. Use format: "According to our knowledge base, [summary]. Full guide: <a href='KB_URL'>article name</a>"
-5. If not found: "I couldn't find a specific guide. Contact <a href='mailto:sales@sat-elite.io'>technical support</a> for help."
+🚨 **KNOWLEDGE BASE LINK RULES:**
 
-Knowledge Base: <a href="https://kb.kognitive.net/?l=en">Kogntive KB</a>
+1. **ONLY use verified KB links** - Never make up or guess article URLs
+2. **For most technical issues**: Direct users to search the KB themselves
+3. **Main KB link**: <a href="https://kb.kognitive.net/?l=en">Kogntive Knowledge Base</a>
+
+**Format for technical support responses:**
+
+For SD-WAN issues:
+"Let me help! First, search the <a href='https://kb.kognitive.net/?l=en'>Knowledge Base</a> for '[search term]'. If you can't find it, email <a href='mailto:sales@sat-elite.io'>technical support</a>."
+
+For eSIM connectivity:
+"Check the <a href='https://epicplatform.sat-elite.io/estore'>EPIC Platform</a> for eSIM support."
+
+**Never say:** "Visit this guide: [made-up-URL]"
+**Always say:** "Search our KB for '[topic]' or contact support directly."
 
 LEAD CAPTURE:
 
@@ -77,112 +99,128 @@ The frontend will automatically display interactive buttons. Never generate numb
 HYPERLINK EXAMPLES:
 
 ✅ "Contact <a href='mailto:sales@sat-elite.io'>sales@sat-elite.io</a> for pricing."
-✅ "See the <a href='https://kb.kognitive.net/es7/...'>setup guide</a> for details."
+✅ "Search the <a href='https://kb.kognitive.net/?l=en'>Knowledge Base</a> for help."
 ✅ "Browse <a href='https://epicplatform.sat-elite.io/estore'>eSIM plans</a>."
 
 ❌ "Visit https://sat-elite.io"
+❌ "Check this guide: https://kb.kognitive.net/some-random-article"
 ❌ "Email sales@sat-elite.io"
 
 TONE: Professional, engaging, helpful. Build rapport and understand customer needs before offering solutions.`;
 
+// 🤖 Main Chat Endpoint
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, conversationHistory = [] } = req.body;
-    
-    // Detect product category and conversation type
-    const isTechnical = /technical support|error|problem|issue|reset|configure|setup|how do i|troubleshoot/i.test(message);
-    const isPricing = /pricing|price|cost|quote|how much/i.test(message);
-    const is5GSIM = /5g sim|esim|sim card|mobile data/i.test(message);
-    
-    // Build context based on conversation type
-    let systemPrompt = SAT_ELITE_CONTEXT;
-    
-    if (isTechnical) {
-      systemPrompt += '\n\n🚨 TECHNICAL SUPPORT: Ask what product they need help with. Then search Kogntive KB. Summarize findings and provide KB article link.';
-    }
-    
-    if (isPricing) {
-      systemPrompt += '\n\n💰 PRICING INQUIRY: After understanding needs, direct to sales@sat-elite.io. If SD-WAN product, mention EPIC Box at €2,999.';
-    }
-    
-    if (is5GSIM) {
-      systemPrompt += '\n\n📱 5G SIM INQUIRY: Direct to EPIC Platform eStore. Ask if for travel, IoT, or other use case first.';
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
     }
 
+    // Build conversation context for OpenAI
     const messages = [
-      { role: 'system', content: systemPrompt },
-      ...conversationHistory.slice(-6),
+      { role: 'system', content: SAT_ELITE_CONTEXT },
+      ...conversationHistory.map(msg => ({
+        role: msg.isBot ? 'assistant' : 'user',
+        content: msg.text
+      })),
       { role: 'user', content: message }
     ];
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Detect intent for enhanced responses
+    const isTechnical = /technical|support|help|issue|problem|not working|error|troubleshoot|fix/i.test(message);
+    const isSDWAN = /sd-wan|sdwan|epic box|network|routing|vpn|firewall|wan|traffic|policy/i.test(message);
+    const isPricing = /price|pricing|cost|how much|quote|€|euro|\$/i.test(message);
+    const is5GSIM = /esim|5g|sim|mobile|cellular|data plan/i.test(message);
+
+    // Build system prompt with context-aware enhancements
+    let systemPrompt = SAT_ELITE_CONTEXT;
+
+    // 🚨 Technical Support Override - Force diagnostic questions
+    if (/^(technical support|i need technical support)/i.test(message.trim())) {
+      systemPrompt += '\n\n🚨 USER CLICKED TECHNICAL SUPPORT: First ask: "Is this for EPIC SD-WAN or eSIM connectivity?" to determine which product. DO NOT send links yet. Most technical issues are SD-WAN related.';
+    }
+
+    // 🚨 Menu Override - Show buttons, not text list
+    if (/anything else|what else|show (?:me )?(?:the )?options|show (?:me )?(?:the )?menu|other (?:products|services)|what (?:do you|can you) offer/i.test(message)) {
+      systemPrompt += '\n\n🚨 USER IS ASKING FOR MENU/OPTIONS: Respond ONLY with: "Let me show you our full menu of products and services!" (The frontend will then display the buttons). DO NOT list products as text.';
+    }
+
+    // 🚨 SD-WAN Technical Issue Override
+    if (isTechnical && isSDWAN) {
+      systemPrompt += '\n\n🚨 SD-WAN TECHNICAL ISSUE DETECTED: Ask diagnostic questions first (e.g., "What specific issue are you experiencing?"). Then direct them to SEARCH the Knowledge Base themselves using: <a href="https://kb.kognitive.net/?l=en">Knowledge Base</a>. NEVER provide specific article links unless they are in the verified list.';
+    }
+
+    // 🚨 eSIM Technical Issue Override
+    if (isTechnical && is5GSIM) {
+      systemPrompt += '\n\n🚨 eSIM TECHNICAL ISSUE: Direct to <a href="https://epicplatform.sat-elite.io/estore">EPIC Platform</a> for eSIM support. If they need human help, ask for their email.';
+    }
+
+    // Call OpenAI API
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
         model: 'gpt-4o',
-        messages: messages,
-        max_tokens: 100, // Allow for engaging lead-gen conversations
+        messages: [{ role: 'system', content: systemPrompt }, ...messages.slice(1)],
+        max_tokens: 100,
         temperature: 0.7
       })
     });
 
-    const data = await response.json();
-    
-    if (data.error) {
-      console.error('OpenAI Error:', data.error);
-      throw new Error(data.error.message || 'OpenAI API error');
-    }
-    
-    if (data.choices && data.choices[0]) {
-      res.json({ 
-        success: true, 
-        reply: data.choices[0].message.content,
-        metadata: {
-          isTechnical: isTechnical,
-          isPricing: isPricing,
-          is5GSIM: is5GSIM
-        }
-      });
-    } else {
-      throw new Error('No response from OpenAI');
+    if (!openaiResponse.ok) {
+      const errorData = await openaiResponse.json();
+      console.error('OpenAI API Error:', errorData);
+      throw new Error(`OpenAI API error: ${errorData.error?.message || 'Unknown error'}`);
     }
 
+    const data = await openaiResponse.json();
+    const aiResponse = data.choices[0].message.content;
+
+    // Return response with metadata
+    res.json({
+      response: aiResponse,
+      metadata: {
+        isTechnical,
+        isSDWAN,
+        isPricing,
+        is5GSIM
+      }
+    });
+
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to get response from AI'
+    console.error('Chat endpoint error:', error);
+    res.status(500).json({
+      error: 'Failed to process chat message',
+      details: error.message
     });
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('✅ Sat-Elite Captain Connect - Lead Gen & Customer Support Chatbot (GPT-4o) - Running!');
-});
-
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    model: 'gpt-4o', 
-    version: '3.0',
-    type: 'lead-generation-support',
+// 🏥 Health Check
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    service: 'Sat-Elite Captain Connect Chatbot',
+    version: '3.1',
+    timestamp: new Date().toISOString(),
     features: [
-      'multi-product-navigation',
-      'kogntive-kb-search',
-      'lead-capture',
-      'conversation-history',
-      'pricing-routing',
-      'technical-support'
+      'OpenAI GPT-4o Integration',
+      'Multi-product lead generation flow',
+      'Technical support diagnostics',
+      'Verified KB links only (no 404s)',
+      'Hyperlinked responses',
+      'Brief, conversational tone',
+      'Interactive menu buttons'
     ]
   });
 });
 
-const PORT = process.env.PORT || 3000;
+// Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Captain Connect Backend running on port ${PORT}`);
-  console.log(`📡 Ready to provide brief, professional assistance`);
+  console.log(`🚀 Sat-Elite Chatbot Backend running on port ${PORT}`);
+  console.log(`📡 OpenAI API Key: ${process.env.OPENAI_API_KEY ? '✅ Configured' : '❌ Missing'}`);
 });
-
