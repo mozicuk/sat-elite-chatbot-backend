@@ -130,15 +130,33 @@ TONE: Professional, engaging, helpful. Build rapport and understand customer nee
 // 🤖 Main Chat Endpoint
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, conversationHistory = [] } = req.body;
+    const { message, conversationHistory = [], userData = {} } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
+    // Build system prompt with user context
+    let systemPromptWithContext = SAT_ELITE_CONTEXT;
+    
+    // Add user details to system prompt if available
+    if (userData.firstName || userData.vesselOrCompany || userData.location) {
+      systemPromptWithContext += '\n\n🔹 CUSTOMER DETAILS (DO NOT ASK FOR THESE AGAIN):\n';
+      if (userData.firstName) {
+        systemPromptWithContext += `- First Name: ${userData.firstName}\n`;
+      }
+      if (userData.vesselOrCompany) {
+        systemPromptWithContext += `- Vessel/Company: ${userData.vesselOrCompany}\n`;
+      }
+      if (userData.location) {
+        systemPromptWithContext += `- Location/Region: ${userData.location}\n`;
+      }
+      systemPromptWithContext += '\nUse these details naturally in your responses. NEVER ask for this information again.';
+    }
+
     // Build conversation context for OpenAI
     const messages = [
-      { role: 'system', content: SAT_ELITE_CONTEXT },
+      { role: 'system', content: systemPromptWithContext },
       ...conversationHistory,  // Frontend already sends correct format: { role, content }
       { role: 'user', content: message }
     ];
@@ -151,42 +169,40 @@ app.post('/api/chat', async (req, res) => {
     const isProfServices = /professional|services|installation|integration|consulting/i.test(message);
     const isPricing = /price|pricing|cost|how much|quote|€|euro|\$/i.test(message);
 
-    // Build system prompt with context-aware enhancements
-    let systemPrompt = SAT_ELITE_CONTEXT;
-
+    // Add context-aware enhancements to system prompt
     // 🚨 Technical Support Override - Force diagnostic questions
     if (/^(technical support|i need technical support)/i.test(message.trim())) {
-      systemPrompt += '\n\n🚨 USER CLICKED TECHNICAL SUPPORT: First ask: "Is this for EPIC SD-WAN or eSIM connectivity?" to determine which product. DO NOT send links yet. Most technical issues are SD-WAN related.';
+      systemPromptWithContext += '\n\n🚨 USER CLICKED TECHNICAL SUPPORT: First ask: "Is this for EPIC SD-WAN or eSIM connectivity?" to determine which product. DO NOT send links yet. Most technical issues are SD-WAN related.';
     }
 
     // 🚨 Menu Override - Show buttons, not text list
     if (/anything else|what else|show (?:me )?(?:the )?options|show (?:me )?(?:the )?menu|other (?:products|services)|what (?:do you|can you) offer/i.test(message)) {
-      systemPrompt += '\n\n🚨 USER IS ASKING FOR MENU/OPTIONS: Respond ONLY with: "Let me show you our full menu of products and services!" (The frontend will then display the buttons). DO NOT list products as text.';
+      systemPromptWithContext += '\n\n🚨 USER IS ASKING FOR MENU/OPTIONS: Respond ONLY with: "Let me show you our full menu of products and services!" (The frontend will then display the buttons). DO NOT list products as text.';
     }
 
     // 🚨 Satellite Service Override
     if (isSatellite) {
-      systemPrompt += '\n\n🚨 SATELLITE SERVICE: Ask which type they need (Starlink/OneWeb/VSAT) and their specific use case (maritime, enterprise, remote). Tailor response to their vessel/company and location.';
+      systemPromptWithContext += '\n\n🚨 SATELLITE SERVICE: Ask which type they need (Starlink/OneWeb/VSAT) and their specific use case (maritime, enterprise, remote). Tailor response to their vessel/company and location.';
     }
 
     // 🚨 SIM Service Override
     if (isSIM) {
-      systemPrompt += '\n\n🚨 SIM/eSIM SERVICE: Direct to <a href="https://epicplatform.sat-elite.io/estore">EPIC Platform</a> for plans. Ask about their use case (travel, IoT, backup connectivity).';
+      systemPromptWithContext += '\n\n🚨 SIM/eSIM SERVICE: Direct to <a href="https://epicplatform.sat-elite.io/estore">EPIC Platform</a> for plans. Ask about their use case (travel, IoT, backup connectivity).';
     }
 
     // 🚨 SD-WAN Service Override
     if (isSDWAN && !isTechnical) {
-      systemPrompt += '\n\n🚨 SD-WAN SERVICE: Mention EPIC Box (€2,999). Ask about their networking needs. For technical issues, direct to <a href="https://kb.kognitive.net/?l=en">Knowledge Base</a>.';
+      systemPromptWithContext += '\n\n🚨 SD-WAN SERVICE: Mention EPIC Box (€2,999). Ask about their networking needs. For technical issues, direct to <a href="https://kb.kognitive.net/?l=en">Knowledge Base</a>.';
     }
 
     // 🚨 SD-WAN Technical Issue Override
     if (isTechnical && isSDWAN) {
-      systemPrompt += '\n\n🚨 SD-WAN TECHNICAL ISSUE: Ask diagnostic questions first. Then direct to <a href="https://kb.kognitive.net/?l=en">Knowledge Base</a> for solutions. NEVER guess article links.';
+      systemPromptWithContext += '\n\n🚨 SD-WAN TECHNICAL ISSUE: Ask diagnostic questions first. Then direct to <a href="https://kb.kognitive.net/?l=en">Knowledge Base</a> for solutions. NEVER guess article links.';
     }
 
     // 🚨 Professional Services Override
     if (isProfServices) {
-      systemPrompt += '\n\n🚨 PROFESSIONAL SERVICES: Ask about their project needs (installation, integration, consulting). Offer to connect with sales team at <a href="mailto:sales@sat-elite.io">sales@sat-elite.io</a>.';
+      systemPromptWithContext += '\n\n🚨 PROFESSIONAL SERVICES: Ask about their project needs (installation, integration, consulting). Offer to connect with sales team at <a href="mailto:sales@sat-elite.io">sales@sat-elite.io</a>.';
     }
 
     // Call OpenAI API
@@ -198,7 +214,7 @@ app.post('/api/chat', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'gpt-4o',
-        messages: [{ role: 'system', content: systemPrompt }, ...messages.slice(1)],
+        messages,  // Already includes systemPromptWithContext
         max_tokens: 100,
         temperature: 0.7
       })
@@ -240,11 +256,13 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     service: 'Sat-Elite Captain Connect Chatbot',
-    version: '4.0',
+    version: '4.1',
     timestamp: new Date().toISOString(),
     features: [
       'OpenAI GPT-4o Integration',
       'Lead qualification (name, vessel/company, location)',
+      'User data persistence (localStorage)',
+      'AI aware of collected user details',
       '5 service categories (Satellite, SIM, SD-WAN, Prof Services, Tech Support)',
       'Personalized consultative conversations',
       'Technical support routing',
